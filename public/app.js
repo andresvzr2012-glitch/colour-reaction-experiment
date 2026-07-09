@@ -13,7 +13,46 @@ init();
 function init() {
   const role = route();
   connectEvents(role === "host" ? "host" : "participant");
+  initFullscreenButton();
   render();
+}
+
+function initFullscreenButton() {
+  const btn = document.createElement("button");
+  btn.id = "fullscreenBtn";
+  btn.title = "Toggle fullscreen";
+  btn.innerHTML = expandIcon();
+  btn.addEventListener("click", toggleFullscreen);
+  document.body.appendChild(btn);
+
+  const update = () => {
+    btn.innerHTML = (document.fullscreenElement || document.webkitFullscreenElement) ? collapseIcon() : expandIcon();
+  };
+  document.addEventListener("fullscreenchange", update);
+  document.addEventListener("webkitfullscreenchange", update);
+}
+
+function toggleFullscreen() {
+  const el = document.documentElement;
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else {
+    (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+  }
+}
+
+function expandIcon() {
+  return `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <polyline points="1,6 1,1 6,1"/><polyline points="12,1 17,1 17,6"/>
+    <polyline points="17,12 17,17 12,17"/><polyline points="6,17 1,17 1,12"/>
+  </svg>`;
+}
+
+function collapseIcon() {
+  return `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <polyline points="6,1 6,6 1,6"/><polyline points="12,6 17,6 17,1"/>
+    <polyline points="17,12 12,12 12,17"/><polyline points="1,12 6,12 6,17"/>
+  </svg>`;
 }
 
 function connectEvents(role) {
