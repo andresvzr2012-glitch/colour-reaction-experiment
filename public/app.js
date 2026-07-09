@@ -350,10 +350,6 @@ function layout(content) {
             <p class="subtle">Middle gray baseline: #808080</p>
           </div>
         </div>
-        <div class="row">
-          <span class="subtle">Session</span>
-          <span class="code">${state?.sessionCode || "----"}</span>
-        </div>
       </header>
       ${content}
     </main>
