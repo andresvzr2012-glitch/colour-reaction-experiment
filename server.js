@@ -22,6 +22,7 @@ const palette = [
 
 const state = {
   sessionCode: makeCode(),
+  className: "",
   participants: new Map(),
   kickedIds: new Set(),
   hostClients: new Set(),
@@ -133,8 +134,13 @@ async function handleApi(req, res, url) {
 
     if (url.pathname === "/api/refresh-code") {
       state.sessionCode = makeCode();
-      broadcast();
+      broadcastTo(state.hostClients);
       return sendJson(res, { ok: true, state: publicState() });
+    }
+
+    if (url.pathname === "/api/class-name") {
+      state.className = clean(body.className, 60);
+      return sendJson(res, { ok: true });
     }
 
     if (url.pathname === "/api/end") {
@@ -253,6 +259,7 @@ function saveSurvey(body, res) {
     hardestColor: clean(body.hardestColor, 40),
     favouriteColor: clean(body.favouriteColor, 40),
     colorVision: clean(body.colorVision, 40),
+    colorVisionDetail: clean(body.colorVisionDetail, 100),
     recordedAt: new Date().toISOString(),
   };
 
@@ -280,6 +287,7 @@ function publicState() {
 
   return {
     sessionCode: state.sessionCode,
+    className: state.className,
     phase: state.phase,
     kickedIds: [...state.kickedIds],
     participants: participantList,
@@ -312,6 +320,7 @@ function summarizeResponses() {
 function sendCsv(res) {
   const columns = [
     "type",
+    "className",
     "participantName",
     "roundNumber",
     "colorName",
@@ -321,11 +330,13 @@ function sendCsv(res) {
     "hardestColor",
     "favouriteColor",
     "colorVision",
+    "colorVisionDetail",
     "recordedAt",
   ];
 
   const responseRows = state.responses.map((row) => ({
     type: "reaction",
+    className: state.className,
     participantName: row.participantName,
     roundNumber: row.roundNumber,
     colorName: row.colorName,
@@ -336,11 +347,13 @@ function sendCsv(res) {
 
   const surveyRows = state.surveys.map((row) => ({
     type: "survey",
+    className: state.className,
     participantName: row.participantName,
     easiestColor: row.easiestColor,
     hardestColor: row.hardestColor,
     favouriteColor: row.favouriteColor,
     colorVision: row.colorVision,
+    colorVisionDetail: row.colorVisionDetail,
     recordedAt: row.recordedAt,
   }));
 
@@ -388,8 +401,12 @@ function serveStatic(req, res, url) {
 }
 
 function broadcast() {
+  broadcastTo(new Set([...state.hostClients, ...state.participantClients]));
+}
+
+function broadcastTo(clients) {
   const data = publicState();
-  for (const client of [...state.hostClients, ...state.participantClients]) {
+  for (const client of clients) {
     sendEvent(client.res, "state", data);
   }
 }

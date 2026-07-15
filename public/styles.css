@@ -13,7 +13,7 @@
 }
 
 * {
-  box-sizing: border-box;
+  box-sizing: border-box; 
 }
 
 body {
@@ -325,16 +325,30 @@ h1 {
 }
 
 .screen {
+  height: 100dvh;
   min-height: 100vh;
+  overflow: hidden;
   display: grid;
   place-items: center;
   padding: 18px;
+  touch-action: manipulation;
   transition: background 120ms linear, color 120ms linear;
 }
 
 .stimulus-screen {
+  height: 100dvh;
   min-height: 100vh;
   padding: 0;
+}
+
+body.participant-mode {
+  overflow: hidden;
+  height: 100dvh;
+}
+
+body.participant-mode .shell {
+  overflow: hidden;
+  height: 100dvh;
 }
 
 @keyframes zoomFadeIn {

@@ -13,6 +13,7 @@ init();
 function init() {
   const role = route();
   connectEvents(role === "host" ? "host" : "participant");
+  if (role === "participant") document.body.classList.add("participant-mode");
   initFullscreenButton();
   render();
 }
@@ -131,6 +132,10 @@ function renderHost() {
         <div class="panel">
           <h2>Host controls</h2>
           <p class="subtle">Share this page's base address with participants, then ask them to choose "Join as participant".</p>
+          <label class="stack">
+            <span class="subtle">Class name</span>
+            <input id="classNameInput" type="text" placeholder="e.g. 10B Science" maxlength="60" value="${escapeHtml(state.className || '')}" />
+          </label>
           <div class="row">
             <span class="subtle">Session code</span>
             <span class="code">${state.sessionCode}</span>
@@ -190,6 +195,7 @@ function renderHost() {
     </section>
   `);
 
+  app.querySelector("#classNameInput").addEventListener("change", (e) => post("/api/class-name", { className: e.target.value.trim() }));
   app.querySelector("[data-action='refresh-code']").addEventListener("click", () => post("/api/refresh-code"));
   app.querySelector("[data-action='start']").addEventListener("click", () => post("/api/start"));
   app.querySelector("[data-action='next']").addEventListener("click", () => post("/api/next"));
@@ -261,8 +267,9 @@ function renderParticipant() {
   }
 
   const screen = app.querySelector(".tap-target");
-  screen.addEventListener("click", () => {
+  screen.addEventListener("pointerdown", (e) => {
     if (state.phase !== "stimulus" || !round || hasAnswered || localRoundId !== round.id) return;
+    e.preventDefault();
     const localReactionMs = performance.now() - localStimulusStart;
     const serverReactionMs = round.stimulusAt ? Date.now() - round.stimulusAt : localReactionMs;
     const reactionMs = localReactionMs >= 0 && localReactionMs < 30000 ? localReactionMs : serverReactionMs;
@@ -331,6 +338,14 @@ function renderSurvey() {
   `);
 
   if (!alreadyDone) {
+    const visionSelect = app.querySelector("#colorVisionSelect");
+    const visionDetail = app.querySelector("#colorVisionDetailInput");
+    if (visionSelect) {
+      visionSelect.addEventListener("change", () => {
+        visionDetail.style.display = visionSelect.value === "Colour blind" ? "block" : "none";
+      });
+    }
+
     app.querySelector("#surveyForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const data = Object.fromEntries(new FormData(event.currentTarget).entries());
@@ -402,7 +417,7 @@ function surveyFieldsTemplate() {
   const colourOptions = state.summary
     .map((c) => `<option value="${c.colorName}">${c.colorName}</option>`)
     .join("");
-  const colourPick = `<option value="">— choose —</option>${colourOptions}`;
+  const colourPick = `<option value=""></option><option value="No Preference">No Preference</option>${colourOptions}`;
 
   return `
     <div class="form-grid">
@@ -420,12 +435,11 @@ function surveyFieldsTemplate() {
       </label>
       <label class="stack">
         <span>How would you describe your colour vision?</span>
-        <select name="colorVision">
-          <option>Normal</option>
-          <option>Red-green difficulty</option>
-          <option>Colour blind</option>
-          <option>Unsure</option>
+        <select name="colorVision" id="colorVisionSelect">
+          <option value="Normal">Normal</option>
+          <option value="Colour blind">Colour blind</option>
         </select>
+        <input id="colorVisionDetailInput" name="colorVisionDetail" placeholder="Please specify (if unsure, type Unknown)" style="display:none" maxlength="100" />
       </label>
     </div>
   `;
