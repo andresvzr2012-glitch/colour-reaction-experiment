@@ -481,7 +481,7 @@ function surveyTemplate(row) {
   return `
     <div class="person">
       <strong>${escapeHtml(row.participantName)}</strong>
-      <span class="subtle">Easiest: ${escapeHtml(row.easiestColor || "-")} · Hardest: ${escapeHtml(row.hardestColor || "-")} · Favourite: ${escapeHtml(row.favouriteColor || "-")} · Vision: ${escapeHtml(row.colorVision || "-")}</span>
+      <span class="subtle">Easiest: ${escapeHtml(row.easiestColor || "-")} · Hardest: ${escapeHtml(row.hardestColor || "-")} · Favourite: ${escapeHtml(row.favouriteColor || "-")} · Vision: ${escapeHtml(row.colorVision || "-")}${row.colorVisionDetail ? ` (${escapeHtml(row.colorVisionDetail)})` : ""}</span>
     </div>
   `;
 }
