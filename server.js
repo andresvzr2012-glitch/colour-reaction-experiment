@@ -349,9 +349,13 @@ function sendCsv(res) {
   const personalAvg = {};
   for (const [id, t] of Object.entries(totals)) personalAvg[id] = t.sum / t.count;
 
+  const classTotal = state.responses.reduce((s, r) => s + r.reactionMs, 0);
+  const classAvg = state.responses.length ? classTotal / state.responses.length : 0;
+
   const responseRows = state.responses.map((row) => {
     const avg = personalAvg[row.participantId];
-    const speedScore = avg ? Math.round((avg / row.reactionMs) * 100) : null;
+    // positive = faster than your baseline for this colour, negative = slower
+    const speedScore = avg ? Math.round(((avg - row.reactionMs) / avg) * 100) : null;
     return {
       type: "reaction",
       className: state.className,
@@ -367,10 +371,10 @@ function sendCsv(res) {
 
   const surveyRows = state.surveys.map((row) => {
     const avg = personalAvg[row.participantId];
-    const myRows = state.responses.filter((r) => r.participantId === row.participantId);
+    // positive = faster than the class average, negative = slower
     const overallSpeedScore =
-      avg && myRows.length
-        ? Math.round(myRows.reduce((s, r) => s + (avg / r.reactionMs) * 100, 0) / myRows.length)
+      classAvg && avg
+        ? Math.round(((classAvg - avg) / classAvg) * 100)
         : null;
     return {
       type: "survey",

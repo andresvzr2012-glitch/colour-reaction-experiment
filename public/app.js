@@ -219,6 +219,7 @@ function renderParticipant() {
   if (!participantId) return renderJoin();
 
   if (state.phase === "ended") {
+    document.body.classList.remove("screen-locked");
     app.innerHTML = participantLayout(`
       <section class="home">
         <div class="choice-panel">
@@ -248,11 +249,16 @@ function renderParticipant() {
   const me = state.participants.find((item) => item.id === participantId);
   if (!me) return renderJoin();
 
+  if (state.phase === "survey") {
+    document.body.classList.remove("screen-locked");
+    return renderSurvey();
+  }
+
+  document.body.classList.add("screen-locked");
+
   const round = state.currentRound;
   const hasAnswered = round && state.responses.some((item) => item.participantId === participantId && item.roundId === round.id);
   const myLast = [...state.responses].reverse().find((item) => item.participantId === participantId);
-
-  if (state.phase === "survey") return renderSurvey();
 
   const openStimulus = state.phase === "stimulus" && round && !hasAnswered;
   const plainExperimentScreen = state.phase === "waiting" || openStimulus;
@@ -280,6 +286,15 @@ function renderParticipant() {
     const localReactionMs = performance.now() - localStimulusStart;
     const serverReactionMs = round.stimulusAt ? Date.now() - round.stimulusAt : localReactionMs;
     const reactionMs = localReactionMs >= 0 && localReactionMs < 30000 ? localReactionMs : serverReactionMs;
+    // Update UI immediately — don't wait for SSE round-trip
+    app.innerHTML = participantLayout(`
+      <section class="screen" style="background:#808080; color:#fff;">
+        <div class="participant-box">
+          <h2>${Math.round(reactionMs)} ms</h2>
+          <p class="subtle">Recorded for ${escapeHtml(round.color.name)}. Wait for the host to continue.</p>
+        </div>
+      </section>
+    `);
     post("/api/respond", { participantId, roundId: round.id, reactionMs });
   });
 
@@ -287,6 +302,7 @@ function renderParticipant() {
 }
 
 function renderJoin() {
+  document.body.classList.remove("screen-locked");
   app.innerHTML = participantLayout(`
     <section class="home">
       <form class="choice-panel" id="joinForm">
@@ -422,7 +438,8 @@ function hostRoundTemplate(round) {
 
 function participantStatusTemplate(round, hasAnswered, myLast) {
   if (state.phase === "lobby" || state.phase === "ready") {
-    return `<h2>Hi, ${escapeHtml(participantName)}</h2><p>Wait for the host to start the next round.</p>`;
+    const greeting = participantName ? `Hi, ${escapeHtml(participantName)}` : "Hi there!";
+    return `<h2>${greeting}</h2><p>Wait for the host to start the next round.</p>`;
   }
   if (state.phase === "waiting") {
     return `<h2>Get ready</h2><p>Watch the screen — tap the moment the colour changes.</p>`;
@@ -474,17 +491,21 @@ function myResultsTemplate() {
 
   const avg = myResponses.reduce((s, r) => s + r.reactionMs, 0) / myResponses.length;
   const avgMs = Math.round(avg);
-  const overallScore = Math.round(myResponses.reduce((s, r) => s + (avg / r.reactionMs) * 100, 0) / myResponses.length);
+  const classAvg = state.responses.length ? state.responses.reduce((s, r) => s + r.reactionMs, 0) / state.responses.length : 0;
+  // positive = faster than class average, negative = slower
+  const overallScore = classAvg ? Math.round(((classAvg - avg) / classAvg) * 100) : null;
   const mySurvey = state.surveys.find((s) => s.participantId === participantId);
 
   const rows = myResponses
     .map((r) => {
-      const score = Math.round((avg / r.reactionMs) * 100);
+      // positive = this colour made you faster than your baseline, negative = slower
+      const score = Math.round(((avg - r.reactionMs) / avg) * 100);
+      const scoreStr = score > 0 ? `+${score}%` : `${score}%`;
       return `
       <div class="result-row">
         <span class="swatch" style="background:${r.colorHex}"></span>
         <span><strong>${escapeHtml(r.colorName)}</strong><br><span class="subtle">Round ${r.roundNumber}</span></span>
-        <span style="text-align:right"><strong>${r.reactionMs} ms</strong><br><span class="subtle">score ${score}</span></span>
+        <span style="text-align:right"><strong>${r.reactionMs} ms</strong><br><span class="subtle">${scoreStr}</span></span>
       </div>`;
     })
     .join("");
@@ -493,11 +514,15 @@ function myResultsTemplate() {
     ? `<p class="subtle" style="text-align:left">Easiest: ${escapeHtml(mySurvey.easiestColor || "—")} &middot; Hardest: ${escapeHtml(mySurvey.hardestColor || "—")} &middot; Favourite: ${escapeHtml(mySurvey.favouriteColor || "—")}</p>`
     : "";
 
+  const overallHtml = overallScore !== null
+    ? `<span class="subtle">vs class: <strong>${overallScore > 0 ? "+" : ""}${overallScore}%</strong></span>`
+    : "";
+
   return `
     <div class="table">${rows}</div>
     <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
-      <span class="subtle">Average: <strong>${avgMs} ms</strong></span>
-      <span class="subtle">Overall speed score: <strong>${overallScore}</strong></span>
+      <span class="subtle">Your average: <strong>${avgMs} ms</strong></span>
+      ${overallHtml}
     </div>
     ${surveyHtml}`;
 }
@@ -510,18 +535,18 @@ function downloadPersonalResults() {
 
   const avg = myResponses.length ? myResponses.reduce((s, r) => s + r.reactionMs, 0) / myResponses.length : 0;
   const avgMs = Math.round(avg);
-  const overallScore = myResponses.length
-    ? Math.round(myResponses.reduce((s, r) => s + (avg / r.reactionMs) * 100, 0) / myResponses.length)
-    : null;
+  const classAvg = state.responses.length ? state.responses.reduce((s, r) => s + r.reactionMs, 0) / state.responses.length : 0;
+  const overallScore = classAvg && avg ? Math.round(((classAvg - avg) / classAvg) * 100) : null;
 
   const tableRows = myResponses
     .map((r) => {
-      const score = avg ? Math.round((avg / r.reactionMs) * 100) : "—";
+      const score = avg ? Math.round(((avg - r.reactionMs) / avg) * 100) : null;
+      const scoreStr = score !== null ? (score > 0 ? `+${score}%` : `${score}%`) : "—";
       return `<tr>
         <td>${r.roundNumber}</td>
         <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${r.colorHex};border:1px solid rgba(0,0,0,0.2);vertical-align:middle;margin-right:6px"></span>${escapeHtml(r.colorName)}</td>
         <td>${r.reactionMs} ms</td>
-        <td>${score}</td>
+        <td>${scoreStr}</td>
       </tr>`;
     })
     .join("");
@@ -564,10 +589,10 @@ function downloadPersonalResults() {
   </table>
   <div class="summary">
     <div><span>Average</span><strong>${avgMs} ms</strong></div>
-    ${overallScore !== null ? `<div><span>Overall speed score</span><strong>${overallScore}</strong></div>` : ""}
+    ${overallScore !== null ? `<div><span>vs class average</span><strong>${overallScore > 0 ? "+" : ""}${overallScore}%</strong></div>` : ""}
   </div>
   ${surveySection}
-  <footer>Speed score: 100 = at your own average. Above 100 = faster than usual for that colour.</footer>
+  <footer>Speed score: +% = faster than your personal average for that colour. &minus;% = slower. &ldquo;vs class&rdquo; compares your average to the class average.</footer>
 </body>
 </html>`;
 
