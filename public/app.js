@@ -220,14 +220,21 @@ function renderParticipant() {
 
   if (state.phase === "ended") {
     app.innerHTML = participantLayout(`
-      <section class="screen" style="background:#808080; color:#fff;">
-        <div class="participant-box">
-          <h2>All done!</h2>
-          <p>Thanks for taking part. The session has ended.</p>
-          <button id="rejoinBtn" style="margin-top:8px">Join a new session</button>
+      <section class="home">
+        <div class="choice-panel">
+          <div class="choice-title">
+            <h2>All done!</h2>
+            <p class="subtle">Thanks for taking part. Here are your personal results.</p>
+          </div>
+          ${myResultsTemplate()}
+          <div class="row" style="justify-content:center;gap:12px;flex-wrap:wrap">
+            <button id="downloadBtn" class="secondary">Download results</button>
+            <button id="rejoinBtn">Join a new session</button>
+          </div>
         </div>
       </section>
     `);
+    app.querySelector("#downloadBtn").addEventListener("click", downloadPersonalResults);
     app.querySelector("#rejoinBtn").addEventListener("click", () => {
       localStorage.removeItem("colourReactionParticipantId");
       localStorage.removeItem("colourReactionParticipantName");
@@ -288,8 +295,8 @@ function renderJoin() {
           <p class="subtle">Enter the session code from the host screen, then wait for the host to begin.</p>
         </div>
         <label class="stack">
-          <span>Name</span>
-          <input name="name" maxlength="40" autocomplete="name" value="${escapeHtml(participantName)}" required />
+          <span>Name <span class="subtle">(leave blank to join as Anonymous)</span></span>
+          <input name="name" maxlength="40" autocomplete="name" value="${escapeHtml(participantName)}" />
         </label>
         <label class="stack">
           <span>Session code</span>
@@ -324,34 +331,50 @@ function renderJoin() {
 
 function renderSurvey() {
   const alreadyDone = state.surveys.some((item) => item.participantId === participantId);
+
+  if (alreadyDone) {
+    app.innerHTML = participantLayout(`
+      <section class="home">
+        <div class="choice-panel">
+          <div class="choice-title">
+            <h2>Survey submitted</h2>
+            <p class="subtle">Thanks. Here are your personal results while you wait.</p>
+          </div>
+          ${myResultsTemplate()}
+          <button id="downloadBtn" class="secondary">Download results</button>
+        </div>
+      </section>
+    `);
+    app.querySelector("#downloadBtn").addEventListener("click", downloadPersonalResults);
+    return;
+  }
+
   app.innerHTML = participantLayout(`
     <section class="home">
       <form class="choice-panel" id="surveyForm">
         <div class="choice-title">
-          <h2>${alreadyDone ? "Survey submitted" : "Final survey"}</h2>
-          <p class="subtle">${alreadyDone ? "Thanks. The host has your reaction times and survey answers." : "Answer these quick questions so the host can compare reaction times with preferences."}</p>
+          <h2>Final survey</h2>
+          <p class="subtle">Answer these quick questions so the host can compare reaction times with preferences.</p>
         </div>
-        ${alreadyDone ? "" : surveyFieldsTemplate()}
-        <button ${alreadyDone ? "type=\"button\" disabled" : ""}>${alreadyDone ? "Complete" : "Submit survey"}</button>
+        ${surveyFieldsTemplate()}
+        <button>Submit survey</button>
       </form>
     </section>
   `);
 
-  if (!alreadyDone) {
-    const visionSelect = app.querySelector("#colorVisionSelect");
-    const visionDetail = app.querySelector("#colorVisionDetailInput");
-    if (visionSelect) {
-      visionSelect.addEventListener("change", () => {
-        visionDetail.style.display = visionSelect.value === "Colour blind" ? "block" : "none";
-      });
-    }
-
-    app.querySelector("#surveyForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-      await post("/api/survey", { participantId, ...data });
+  const visionSelect = app.querySelector("#colorVisionSelect");
+  const visionDetail = app.querySelector("#colorVisionDetailInput");
+  if (visionSelect) {
+    visionSelect.addEventListener("change", () => {
+      visionDetail.style.display = visionSelect.value === "Colour blind" ? "block" : "none";
     });
   }
+
+  app.querySelector("#surveyForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    await post("/api/survey", { participantId, ...data });
+  });
 }
 
 function layout(content) {
@@ -443,6 +466,118 @@ function surveyFieldsTemplate() {
       </label>
     </div>
   `;
+}
+
+function myResultsTemplate() {
+  const myResponses = state.responses.filter((r) => r.participantId === participantId);
+  if (!myResponses.length) return `<p class="subtle">No reaction data recorded.</p>`;
+
+  const avg = myResponses.reduce((s, r) => s + r.reactionMs, 0) / myResponses.length;
+  const avgMs = Math.round(avg);
+  const overallScore = Math.round(myResponses.reduce((s, r) => s + (avg / r.reactionMs) * 100, 0) / myResponses.length);
+  const mySurvey = state.surveys.find((s) => s.participantId === participantId);
+
+  const rows = myResponses
+    .map((r) => {
+      const score = Math.round((avg / r.reactionMs) * 100);
+      return `
+      <div class="result-row">
+        <span class="swatch" style="background:${r.colorHex}"></span>
+        <span><strong>${escapeHtml(r.colorName)}</strong><br><span class="subtle">Round ${r.roundNumber}</span></span>
+        <span style="text-align:right"><strong>${r.reactionMs} ms</strong><br><span class="subtle">score ${score}</span></span>
+      </div>`;
+    })
+    .join("");
+
+  const surveyHtml = mySurvey
+    ? `<p class="subtle" style="text-align:left">Easiest: ${escapeHtml(mySurvey.easiestColor || "—")} &middot; Hardest: ${escapeHtml(mySurvey.hardestColor || "—")} &middot; Favourite: ${escapeHtml(mySurvey.favouriteColor || "—")}</p>`
+    : "";
+
+  return `
+    <div class="table">${rows}</div>
+    <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:6px">
+      <span class="subtle">Average: <strong>${avgMs} ms</strong></span>
+      <span class="subtle">Overall speed score: <strong>${overallScore}</strong></span>
+    </div>
+    ${surveyHtml}`;
+}
+
+function downloadPersonalResults() {
+  const myResponses = state.responses.filter((r) => r.participantId === participantId);
+  const mySurvey = state.surveys.find((s) => s.participantId === participantId);
+  const name = participantName || "Anonymous";
+  const className = state.className || "";
+
+  const avg = myResponses.length ? myResponses.reduce((s, r) => s + r.reactionMs, 0) / myResponses.length : 0;
+  const avgMs = Math.round(avg);
+  const overallScore = myResponses.length
+    ? Math.round(myResponses.reduce((s, r) => s + (avg / r.reactionMs) * 100, 0) / myResponses.length)
+    : null;
+
+  const tableRows = myResponses
+    .map((r) => {
+      const score = avg ? Math.round((avg / r.reactionMs) * 100) : "—";
+      return `<tr>
+        <td>${r.roundNumber}</td>
+        <td><span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${r.colorHex};border:1px solid rgba(0,0,0,0.2);vertical-align:middle;margin-right:6px"></span>${escapeHtml(r.colorName)}</td>
+        <td>${r.reactionMs} ms</td>
+        <td>${score}</td>
+      </tr>`;
+    })
+    .join("");
+
+  const surveySection = mySurvey
+    ? `<h2>Survey</h2>
+      <table><tbody>
+        <tr><th>Easiest colour</th><td>${escapeHtml(mySurvey.easiestColor || "—")}</td></tr>
+        <tr><th>Hardest colour</th><td>${escapeHtml(mySurvey.hardestColor || "—")}</td></tr>
+        <tr><th>Favourite colour</th><td>${escapeHtml(mySurvey.favouriteColor || "—")}</td></tr>
+        <tr><th>Colour vision</th><td>${escapeHtml(mySurvey.colorVision || "—")}${mySurvey.colorVisionDetail ? ` (${escapeHtml(mySurvey.colorVisionDetail)})` : ""}</td></tr>
+      </tbody></table>`
+    : "";
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Colour Reaction Results – ${escapeHtml(name)}</title>
+  <style>
+    body{font-family:system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 20px;color:#1b1f23}
+    h1{font-size:22px;margin:0 0 4px}p.sub{color:#64707d;font-size:14px;margin:0 0 24px}
+    h2{font-size:16px;margin:28px 0 8px}
+    table{border-collapse:collapse;width:100%}
+    th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #d6dde5;font-size:14px}
+    th{background:#f7f9fb;font-weight:600}
+    .summary{display:flex;gap:32px;margin-top:16px}
+    .summary div span{font-size:13px;color:#64707d;display:block}
+    .summary div strong{font-size:20px}
+    footer{margin-top:40px;font-size:12px;color:#64707d}
+  </style>
+</head>
+<body>
+  <h1>Colour Reaction Results</h1>
+  <p class="sub">${escapeHtml(name)}${className ? ` &mdash; ${escapeHtml(className)}` : ""}</p>
+  <h2>Reaction times</h2>
+  <table>
+    <thead><tr><th>Round</th><th>Colour</th><th>Time</th><th>Speed score</th></tr></thead>
+    <tbody>${tableRows}</tbody>
+  </table>
+  <div class="summary">
+    <div><span>Average</span><strong>${avgMs} ms</strong></div>
+    ${overallScore !== null ? `<div><span>Overall speed score</span><strong>${overallScore}</strong></div>` : ""}
+  </div>
+  ${surveySection}
+  <footer>Speed score: 100 = at your own average. Above 100 = faster than usual for that colour.</footer>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `colour-reaction-${(name).replace(/\s+/g, "-").toLowerCase()}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function personTemplate(person) {

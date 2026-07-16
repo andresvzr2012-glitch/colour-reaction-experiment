@@ -23,6 +23,7 @@ const palette = [
 const state = {
   sessionCode: makeCode(),
   className: "",
+  anonCount: 0,
   participants: new Map(),
   kickedIds: new Set(),
   hostClients: new Set(),
@@ -85,12 +86,13 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
 
     if (url.pathname === "/api/join") {
-      const name = String(body.name || "").trim().slice(0, 40);
+      const rawName = String(body.name || "").trim().slice(0, 40);
       const sessionCode = String(body.sessionCode || "").trim().toUpperCase();
-      if (!name) return sendJson(res, { error: "Name is required." }, 400);
       if (sessionCode !== state.sessionCode) {
         return sendJson(res, { error: "Session code does not match." }, 403);
       }
+      state.anonCount += rawName ? 0 : 1;
+      const name = rawName || `Anonymous ${state.anonCount}`;
       const id = body.id || makeId();
       state.participants.set(id, {
         id,
@@ -128,6 +130,7 @@ async function handleApi(req, res, url) {
       state.surveys = [];
       state.participants.clear();
       state.kickedIds.clear();
+      state.anonCount = 0;
       broadcast();
       return sendJson(res, { ok: true, state: publicState() });
     }
@@ -326,6 +329,8 @@ function sendCsv(res) {
     "colorName",
     "colorHex",
     "reactionMs",
+    "speedScore",
+    "overallSpeedScore",
     "easiestColor",
     "hardestColor",
     "favouriteColor",
@@ -334,28 +339,52 @@ function sendCsv(res) {
     "recordedAt",
   ];
 
-  const responseRows = state.responses.map((row) => ({
-    type: "reaction",
-    className: state.className,
-    participantName: row.participantName,
-    roundNumber: row.roundNumber,
-    colorName: row.colorName,
-    colorHex: row.colorHex,
-    reactionMs: row.reactionMs,
-    recordedAt: row.recordedAt,
-  }));
+  // personal average per participant (baseline for fair comparison)
+  const totals = {};
+  for (const r of state.responses) {
+    if (!totals[r.participantId]) totals[r.participantId] = { sum: 0, count: 0 };
+    totals[r.participantId].sum += r.reactionMs;
+    totals[r.participantId].count++;
+  }
+  const personalAvg = {};
+  for (const [id, t] of Object.entries(totals)) personalAvg[id] = t.sum / t.count;
 
-  const surveyRows = state.surveys.map((row) => ({
-    type: "survey",
-    className: state.className,
-    participantName: row.participantName,
-    easiestColor: row.easiestColor,
-    hardestColor: row.hardestColor,
-    favouriteColor: row.favouriteColor,
-    colorVision: row.colorVision,
-    colorVisionDetail: row.colorVisionDetail,
-    recordedAt: row.recordedAt,
-  }));
+  const responseRows = state.responses.map((row) => {
+    const avg = personalAvg[row.participantId];
+    const speedScore = avg ? Math.round((avg / row.reactionMs) * 100) : null;
+    return {
+      type: "reaction",
+      className: state.className,
+      participantName: row.participantName,
+      roundNumber: row.roundNumber,
+      colorName: row.colorName,
+      colorHex: row.colorHex,
+      reactionMs: row.reactionMs,
+      speedScore,
+      recordedAt: row.recordedAt,
+    };
+  });
+
+  const surveyRows = state.surveys.map((row) => {
+    const avg = personalAvg[row.participantId];
+    const myRows = state.responses.filter((r) => r.participantId === row.participantId);
+    const overallSpeedScore =
+      avg && myRows.length
+        ? Math.round(myRows.reduce((s, r) => s + (avg / r.reactionMs) * 100, 0) / myRows.length)
+        : null;
+    return {
+      type: "survey",
+      className: state.className,
+      participantName: row.participantName,
+      overallSpeedScore,
+      easiestColor: row.easiestColor,
+      hardestColor: row.hardestColor,
+      favouriteColor: row.favouriteColor,
+      colorVision: row.colorVision,
+      colorVisionDetail: row.colorVisionDetail,
+      recordedAt: row.recordedAt,
+    };
+  });
 
   const csv = [
     columns.join(","),
