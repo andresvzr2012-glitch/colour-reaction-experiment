@@ -5,7 +5,7 @@ let participantName = localStorage.getItem("colourReactionParticipantName") || "
 let localStimulusStart = 0;
 let localRoundId = "";
 let tickTimer = null;
-let prematureTapAt = null;
+let prematureTaps = { count: 0, lastAt: null };
 
 const route = () => new URLSearchParams(location.search).get("role") || "home";
 
@@ -76,7 +76,7 @@ function connectEvents(role) {
     }
 
     if (route() === "participant" && state.phase === "waiting" && previousPhase !== "waiting") {
-      prematureTapAt = null;
+      prematureTaps = { count: 0, lastAt: null };
     }
 
     render();
@@ -288,7 +288,8 @@ function renderParticipant() {
   screen.addEventListener("pointerdown", (e) => {
     // Record taps during the waiting phase for anti-cheat
     if (state.phase === "waiting" && round) {
-      prematureTapAt = performance.now();
+      prematureTaps.count++;
+      prematureTaps.lastAt = performance.now();
       return;
     }
     if (state.phase !== "stimulus" || !round || hasAnswered || localRoundId !== round.id) return;
@@ -297,10 +298,12 @@ function renderParticipant() {
     const serverReactionMs = round.stimulusAt ? Date.now() - round.stimulusAt : localReactionMs;
     const reactionMs = localReactionMs >= 0 && localReactionMs < 30000 ? localReactionMs : serverReactionMs;
 
-    // Anti-cheat: was there a tap within 1 second before the stimulus appeared?
-    const msBefore = prematureTapAt !== null ? localStimulusStart - prematureTapAt : Infinity;
-    if (msBefore >= 0 && msBefore < 1000) {
-      prematureTapAt = null;
+    // Anti-cheat: 3+ taps = definitely spamming; or 2 taps within 500ms of the stimulus = timing it
+    const { count, lastAt } = prematureTaps;
+    const msBefore = lastAt !== null ? localStimulusStart - lastAt : Infinity;
+    const isCheat = count >= 3 || (count >= 2 && msBefore >= 0 && msBefore < 500);
+    if (isCheat) {
+      prematureTaps = { count: 0, lastAt: null };
       app.innerHTML = participantLayout(`
         <section class="screen" style="background:#808080; color:#fff;">
           <div class="participant-box">
@@ -312,7 +315,7 @@ function renderParticipant() {
       return;
     }
 
-    prematureTapAt = null;
+    prematureTaps = { count: 0, lastAt: null };
     // Update UI immediately — don't wait for SSE round-trip
     app.innerHTML = participantLayout(`
       <section class="screen" style="background:#808080; color:#fff;">

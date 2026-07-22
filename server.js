@@ -188,7 +188,7 @@ function startNextRound(res) {
   }
 
   const color = state.order[nextIndex];
-  const delayMs = 3000 + Math.random() * 4000;
+  const delayMs = 4000 + Math.random() * 6000;
   const roundId = makeId();
 
   state.phase = "waiting";
