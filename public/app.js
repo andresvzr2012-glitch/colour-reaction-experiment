@@ -5,6 +5,7 @@ let participantName = localStorage.getItem("colourReactionParticipantName") || "
 let localStimulusStart = 0;
 let localRoundId = "";
 let tickTimer = null;
+let prematureTapAt = null;
 
 const route = () => new URLSearchParams(location.search).get("role") || "home";
 
@@ -72,6 +73,10 @@ function connectEvents(role) {
     ) {
       localStimulusStart = performance.now();
       localRoundId = state.currentRound.id;
+    }
+
+    if (route() === "participant" && state.phase === "waiting" && previousPhase !== "waiting") {
+      prematureTapAt = null;
     }
 
     render();
@@ -281,11 +286,33 @@ function renderParticipant() {
 
   const screen = app.querySelector(".tap-target");
   screen.addEventListener("pointerdown", (e) => {
+    // Record taps during the waiting phase for anti-cheat
+    if (state.phase === "waiting" && round) {
+      prematureTapAt = performance.now();
+      return;
+    }
     if (state.phase !== "stimulus" || !round || hasAnswered || localRoundId !== round.id) return;
     e.preventDefault();
     const localReactionMs = performance.now() - localStimulusStart;
     const serverReactionMs = round.stimulusAt ? Date.now() - round.stimulusAt : localReactionMs;
     const reactionMs = localReactionMs >= 0 && localReactionMs < 30000 ? localReactionMs : serverReactionMs;
+
+    // Anti-cheat: was there a tap within 1 second before the stimulus appeared?
+    const msBefore = prematureTapAt !== null ? localStimulusStart - prematureTapAt : Infinity;
+    if (msBefore >= 0 && msBefore < 1000) {
+      prematureTapAt = null;
+      app.innerHTML = participantLayout(`
+        <section class="screen" style="background:#808080; color:#fff;">
+          <div class="participant-box">
+            <h2>Invalid tap</h2>
+            <p>You tapped before the colour appeared. Please wait for the screen to change colour, then tap.</p>
+          </div>
+        </section>
+      `);
+      return;
+    }
+
+    prematureTapAt = null;
     // Update UI immediately — don't wait for SSE round-trip
     app.innerHTML = participantLayout(`
       <section class="screen" style="background:#808080; color:#fff;">
@@ -364,6 +391,9 @@ function renderSurvey() {
     app.querySelector("#downloadBtn").addEventListener("click", downloadPersonalResults);
     return;
   }
+
+  // Don't re-render if the form is already in the DOM — SSE events must not erase what the user typed
+  if (app.querySelector("#surveyForm")) return;
 
   app.innerHTML = participantLayout(`
     <section class="home">

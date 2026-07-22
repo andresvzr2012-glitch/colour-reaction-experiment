@@ -321,25 +321,7 @@ function summarizeResponses() {
 }
 
 function sendCsv(res) {
-  const columns = [
-    "type",
-    "className",
-    "participantName",
-    "roundNumber",
-    "colorName",
-    "colorHex",
-    "reactionMs",
-    "speedScore",
-    "overallSpeedScore",
-    "easiestColor",
-    "hardestColor",
-    "favouriteColor",
-    "colorVision",
-    "colorVisionDetail",
-    "recordedAt",
-  ];
-
-  // personal average per participant (baseline for fair comparison)
+  // Personal averages per participant
   const totals = {};
   for (const r of state.responses) {
     if (!totals[r.participantId]) totals[r.participantId] = { sum: 0, count: 0 };
@@ -349,59 +331,51 @@ function sendCsv(res) {
   const personalAvg = {};
   for (const [id, t] of Object.entries(totals)) personalAvg[id] = t.sum / t.count;
 
-  const classTotal = state.responses.reduce((s, r) => s + r.reactionMs, 0);
-  const classAvg = state.responses.length ? classTotal / state.responses.length : 0;
+  const classAvg = state.responses.length
+    ? state.responses.reduce((s, r) => s + r.reactionMs, 0) / state.responses.length
+    : 0;
 
-  const responseRows = state.responses.map((row) => {
-    const avg = personalAvg[row.participantId];
-    // positive = faster than your baseline for this colour, negative = slower
-    const speedScore = avg ? Math.round(((avg - row.reactionMs) / avg) * 100) : null;
-    return {
-      type: "reaction",
-      className: state.className,
-      participantName: row.participantName,
-      roundNumber: row.roundNumber,
-      colorName: row.colorName,
-      colorHex: row.colorHex,
-      reactionMs: row.reactionMs,
-      speedScore,
-      recordedAt: row.recordedAt,
-    };
-  });
+  const byName = (a, b) => a.participantName.localeCompare(b.participantName, undefined, { sensitivity: "base" });
 
-  const surveyRows = state.surveys.map((row) => {
-    const avg = personalAvg[row.participantId];
-    // positive = faster than the class average, negative = slower
-    const overallSpeedScore =
-      classAvg && avg
-        ? Math.round(((classAvg - avg) / classAvg) * 100)
-        : null;
-    return {
-      type: "survey",
-      className: state.className,
-      participantName: row.participantName,
-      overallSpeedScore,
-      easiestColor: row.easiestColor,
-      hardestColor: row.hardestColor,
-      favouriteColor: row.favouriteColor,
-      colorVision: row.colorVision,
-      colorVisionDetail: row.colorVisionDetail,
-      recordedAt: row.recordedAt,
-    };
-  });
+  // Section 1: Reaction times — sorted by name A-Z, then slowest first within each person
+  const reactionCols = ["name", "class", "round", "colour", "reactionTime_ms", "speedEffect_%"];
+  const reactionRows = [...state.responses]
+    .sort((a, b) => byName(a, b) || b.reactionMs - a.reactionMs)
+    .map((r) => {
+      const avg = personalAvg[r.participantId];
+      const effect = avg ? Math.round(((avg - r.reactionMs) / avg) * 100) : "";
+      return [r.participantName, state.className, r.roundNumber, r.colorName, r.reactionMs, effect];
+    });
 
-  const csv = [
-    columns.join(","),
-    ...[...responseRows, ...surveyRows].map((row) =>
-      columns.map((column) => csvValue(row[column] ?? "")).join(",")
-    ),
-  ].join("\n");
+  // Section 2: Survey answers — sorted by name A-Z
+  const surveyCols = ["name", "class", "easiest", "hardest", "favourite", "colourVision", "colourVisionDetail", "vsClass_%"];
+  const surveyRows = [...state.surveys]
+    .sort(byName)
+    .map((r) => {
+      const avg = personalAvg[r.participantId];
+      const vsClass = classAvg && avg ? Math.round(((classAvg - avg) / classAvg) * 100) : "";
+      return [r.participantName, state.className, r.easiestColor, r.hardestColor, r.favouriteColor, r.colorVision, r.colorVisionDetail, vsClass];
+    });
+
+  const lines = [
+    "Reaction Times",
+    reactionCols.join(","),
+    ...reactionRows.map((row) => row.map((v) => csvValue(v ?? "")).join(",")),
+    "",
+    "Survey Answers",
+    surveyCols.join(","),
+    ...surveyRows.map((row) => row.map((v) => csvValue(v ?? "")).join(",")),
+  ];
+
+  const filename = state.className
+    ? `colour-reaction-${state.className.replace(/[^a-z0-9]/gi, "-").toLowerCase()}.csv`
+    : "colour-reaction-results.csv";
 
   res.writeHead(200, {
     "Content-Type": "text/csv; charset=utf-8",
-    "Content-Disposition": "attachment; filename=\"colour-reaction-results.csv\"",
+    "Content-Disposition": `attachment; filename="${filename}"`,
   });
-  res.end(csv);
+  res.end(lines.join("\n"));
 }
 
 function serveStatic(req, res, url) {
